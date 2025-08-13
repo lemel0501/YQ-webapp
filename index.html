@@ -71,23 +71,21 @@
   </div>
 
 <script>
-// 讓頁面在非 Telegram 環境也不會中斷
+// 安全取得 Telegram WebApp 物件（一般瀏覽器不會噴錯）
 const tg = (() => {
-  try {
-    if (window.Telegram && window.Telegram.WebApp) {
-      window.Telegram.WebApp.expand();
-      return window.Telegram.WebApp;
-    }
-  } catch(e){}
-  // fallback：提供空函式避免報錯
+  try { if (window.Telegram && window.Telegram.WebApp) { window.Telegram.WebApp.expand(); return window.Telegram.WebApp; } }
+  catch(_) {}
   return { sendData:()=>{}, close:()=>{}, expand:()=>{} };
 })();
 
 window.addEventListener('DOMContentLoaded', () => {
-  // ===== 五路繼電器 =====
   const RELAY_COUNT = 5;
-  const relaysDiv = document.getElementById('relays');
+  const KEY = 'esp32_webapp_cache_v1';     // 本地快取 key
+  const relaysDiv   = document.getElementById('relays');
+  const notifsDiv   = document.getElementById('notifs');
+  const addNotifBtn = document.getElementById('addNotif');
 
+  // ---------- 五路繼電器 UI ----------
   function relayRow(idx){
     const el = document.createElement('div');
     el.className = 'relay-row';
@@ -105,31 +103,26 @@ window.addEventListener('DOMContentLoaded', () => {
   relaysDiv.innerHTML = "";
   for (let i=0;i<RELAY_COUNT;i++) relaysDiv.appendChild(relayRow(i));
 
-  // 滑桿 -> 即時送出
-  relaysDiv.addEventListener('change', (e)=>{
-    if(e.target.matches('.rtoggle')){
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.checked;
-      tg.sendData(JSON.stringify({ type:'relay', idx, state }));
-    }
+  // 滑桿即時送出
+  relaysDiv.addEventListener('change', e=>{
+    if (!e.target.matches('.rtoggle')) return;
+    const idx = Number(e.target.dataset.idx);
+    const state = e.target.checked;
+    tg.sendData(JSON.stringify({ type:'relay', idx, state }));
   });
-  // ON/OFF 快捷（並同步滑桿）
-  relaysDiv.addEventListener('click', (e)=>{
-    if(e.target.matches('.r-on,.r-off')){
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.classList.contains('r-on');
-      const t = document.querySelector(`.rtoggle[data-idx="${idx}"]`);
-      if (t) t.checked = state;
-      tg.sendData(JSON.stringify({ type:'relay', idx, state }));
-    }
+  // 快捷 ON/OFF（並同步滑桿）
+  relaysDiv.addEventListener('click', e=>{
+    if (!e.target.matches('.r-on,.r-off')) return;
+    const idx = Number(e.target.dataset.idx);
+    const state = e.target.classList.contains('r-on');
+    const t = document.querySelector(`.rtoggle[data-idx="${idx}"]`);
+    if (t) t.checked = state;                       // ← UI 會變色移動
+    tg.sendData(JSON.stringify({ type:'relay', idx, state }));
   });
 
-  // ===== GPIO 觸發推播（最多 10 組）=====
-  const PIN_OPTIONS = [0,2,4,5,13,14,16,17,18,19,21];
+  // ---------- GPIO 觸發推播 ----------
+  const PIN_OPTIONS = [0,2,4,5,13,14,16,17,18,19,21];   // 注意 21/22 可能被 OLED 佔用
   const MAX_NOTIFS = 10;
-  const notifsDiv = document.getElementById('notifs');
-  const addNotifBtn = document.getElementById('addNotif');
-
   function oneNotifRow(pin=null, msg=''){
     const row = document.createElement('div');
     row.className = 'notif-row';
@@ -144,25 +137,34 @@ window.addEventListener('DOMContentLoaded', () => {
     row.querySelector('.del').onclick = ()=> row.remove();
     return row;
   }
-  function addNotif(pin=null, msg=''){
+  function addNotif(pin=null,msg=''){
     if (notifsDiv.querySelectorAll('.notif-row').length >= MAX_NOTIFS) { alert(`已達上限（${MAX_NOTIFS}）`); return; }
     notifsDiv.appendChild(oneNotifRow(pin,msg));
   }
-  if (addNotifBtn) addNotifBtn.onclick = ()=> addNotif(); // 首次先讓使用者自己新增
+  if (addNotifBtn) addNotifBtn.onclick = ()=> addNotif();
 
-  // ===== 儲存（不再送 messages）=====
-  const saveBtn  = document.getElementById('save');
-  const closeBtn = document.getElementById('close');
+  // ---------- 從本地快取還原表單 ----------
+  try {
+    const cache = JSON.parse(localStorage.getItem(KEY) || '{}');
+    if (Array.isArray(cache.relay_names))
+      cache.relay_names.forEach((n,i)=>{ const ipt=document.querySelector(`.rname[data-idx="${i}"]`); if(ipt) ipt.value=n; });
+    if (Array.isArray(cache.relays))
+      cache.relays.forEach((v,i)=>{ const t=document.querySelector(`.rtoggle[data-idx="${i}"]`); if(t) t.checked=!!v; });
+    if (Array.isArray(cache.notifs))
+      cache.notifs.forEach(n=> addNotif(n.pin,n.msg));
+    if (cache.chat_ids) document.getElementById('chat_ids').value = cache.chat_ids;
+    if (cache.token)    document.getElementById('token').value    = cache.token;
+  } catch(_) {}
 
-  if (saveBtn) saveBtn.onclick = ()=>{
+  // ---------- 儲存 ----------
+  document.getElementById('save').onclick = ()=>{
     const chat_ids = document.getElementById('chat_ids').value
       .split(/[\n,\s]+/).map(s=>s.trim()).filter(Boolean);
     const token = document.getElementById('token').value.trim();
 
     const relay_names = Array.from(document.querySelectorAll('.rname'))
       .map((i,k)=> i.value.trim() || `Relay ${k+1}`);
-    const relays = Array.from(document.querySelectorAll('.rtoggle'))
-      .map(t=>t.checked);
+    const relays = Array.from(document.querySelectorAll('.rtoggle')).map(t=>t.checked);
 
     const notifs = Array.from(document.querySelectorAll('.notif-row')).map(r=>{
       const pin = Number(r.querySelector('.npin').value);
@@ -172,14 +174,14 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const payload = { type:'save_config', chat_ids, token, relay_names, relays, notifs };
     const json = JSON.stringify(payload);
-    if (json.length > 3500) {   // Telegram WebApp 送資料大小限制保守值
-      alert('設定資料過大（'+json.length+' bytes），請刪減項目或縮短文字。');
-      return;
-    }
+    if (json.length > 3500) { alert('設定資料過大（'+json.length+' bytes），請刪減項目或縮短文字。'); return; }
+
+    // 先存到本地快取，下一次開頁會自動帶入
+    try { localStorage.setItem(KEY, JSON.stringify({chat_ids:chat_ids.join('\n'), token, relay_names, relays, notifs})); } catch(_){}
+
     tg.sendData(json);
   };
-
-  if (closeBtn) closeBtn.onclick = ()=> tg.close();
+  document.getElementById('close').onclick = ()=> tg.close();
 });
 </script>
 </body>
