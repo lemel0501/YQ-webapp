@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ESP32 設定</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 16px; }
+    .grid { display: grid; gap: 12px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    input[type=text], textarea { width: 100%; padding: 8px; }
+    .card { border:1px solid #ddd; border-radius:10px; padding:12px; }
+    .btn { padding:10px 14px; border-radius:10px; border:none; background:#2ea44f; color:#fff; cursor:pointer; }
+    .btn.secondary { background:#0366d6; }
+  </style>
+</head>
+<body>
+  <h2>ESP32 設定（Telegram Web App）</h2>
+
+  <div class="grid">
+    <div class="card">
+      <h3>推播目標 Chat IDs</h3>
+      <p>以逗號或換行分隔（可填群組 ID 與個人 ID）。</p>
+      <textarea id="chat_ids" rows="3" placeholder="-1001234567890, 123456789"></textarea>
+    </div>
+
+    <div class="card">
+      <h3>推播訊息（示例 5 筆，可自行增減）</h3>
+      <div class="grid" id="msgs"></div>
+      <button class="btn secondary" id="addMsg">＋新增訊息欄</button>
+    </div>
+
+    <div class="card">
+      <h3>五路繼電器</h3>
+      <div class="row"><label><input type="checkbox" class="relay" data-idx="0"> Relay 1</label></div>
+      <div class="row"><label><input type="checkbox" class="relay" data-idx="1"> Relay 2</label></div>
+      <div class="row"><label><input type="checkbox" class="relay" data-idx="2"> Relay 3</label></div>
+      <div class="row"><label><input type="checkbox" class="relay" data-idx="3"> Relay 4</label></div>
+      <div class="row"><label><input type="checkbox" class="relay" data-idx="4"> Relay 5</label></div>
+    </div>
+
+    <div class="card">
+      <h3>（可選）更換 Bot Token</h3>
+      <input id="token" type="text" placeholder="若更換將自動重啟生效" />
+    </div>
+
+    <div class="row">
+      <button class="btn" id="save">💾 儲存設定</button>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram.WebApp; tg.expand();
+
+    const msgs = document.getElementById('msgs');
+    const addMsg = document.getElementById('addMsg');
+    function addMsgInput(val=''){
+      const i = document.createElement('input');
+      i.type = 'text'; i.className = 'msg'; i.placeholder = '訊息內容'; i.value = val;
+      msgs.appendChild(i);
+    }
+    // 預設 5 筆
+    for(let i=0;i<5;i++) addMsgInput('');
+    addMsg.onclick = ()=> addMsgInput('');
+
+    document.getElementById('save').onclick = ()=>{
+      const chat_ids = document.getElementById('chat_ids').value
+        .split(/[\n,\s]+/).map(s=>s.trim()).filter(Boolean);
+      const messages = Array.from(document.querySelectorAll('.msg')).map(i=>i.value);
+      const relays = Array.from(document.querySelectorAll('.relay')).map(c=>c.checked);
+      const token  = document.getElementById('token').value.trim();
+      const data = { type: 'save_config', chat_ids, messages, relays, token };
+      tg.sendData(JSON.stringify(data));
+    };
+
+    // 快速單顆控制範例：
+    Array.from(document.querySelectorAll('.relay')).forEach(el=>{
+      el.addEventListener('change', ()=>{
+        const idx = Number(el.dataset.idx);
+        const state = el.checked;
+        tg.sendData(JSON.stringify({ type:'relay', idx, state }));
+      });
+    });
+  </script>
+</body>
+</html>
