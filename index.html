@@ -70,99 +70,110 @@
     </div>
   </div>
 
-  <script>
-    const tg = window.Telegram.WebApp; tg.expand();
-
-    // ===== 推播訊息（上限 10）=====
-    const msgs = document.getElementById('msgs');
-    const addMsgBtn = document.getElementById('addMsg');
-    const MAX_MSGS = 10;
-    function addMsgRow(val=''){
-      if (msgs.querySelectorAll('.msg-row').length >= MAX_MSGS) { alert(`已達上限（${MAX_MSGS}）`); return; }
-      const row = document.createElement('div');
-      row.className = 'msg-row';
-      row.innerHTML = `<input type="text" class="msg" placeholder="訊息內容" value="${val.replace(/"/g,'&quot;')}"><button class="msg-del">✕</button>`;
-      row.querySelector('.msg-del').onclick = () => row.remove();
-      msgs.appendChild(row);
+<script>
+// 在非 Telegram 環境也不會拋錯
+const tg = (() => {
+  try {
+    if (window.Telegram && window.Telegram.WebApp) {
+      window.Telegram.WebApp.expand();
+      return window.Telegram.WebApp;
     }
-    for (let i=0;i<5;i++) addMsgRow('');
-    addMsgBtn.onclick = ()=> addMsgRow('');
+  } catch (e) {}
+  return { sendData: () => {}, close: () => {}, expand: () => {} };
+})();
 
-    // ===== 繼電器：名稱 + 滑桿 + 快捷鍵（ON=綠、OFF=灰）=====
-    const RELAY_COUNT = 5;
-    const relaysDiv = document.getElementById('relays');
-    function relayRow(idx){
-      const wrap = document.createElement('div');
-      wrap.className = 'relay-row';
-      wrap.innerHTML = `
-        <input type="text" class="rname" data-idx="${idx}" placeholder="Relay ${idx+1} 名稱">
-        <label class="switch"><input type="checkbox" class="rtoggle" data-idx="${idx}"><span class="slider"></span></label>
-        <button class="btn green r-on"  data-idx="${idx}">ON</button>
-        <button class="btn gray  r-off" data-idx="${idx}">OFF</button>
-      `;
-      return wrap;
+window.addEventListener('DOMContentLoaded', () => {
+  // ===== 五路繼電器：名稱 + 滑桿 + ON/OFF 快捷 =====
+  const RELAY_COUNT = 5;
+  const relaysDiv = document.getElementById('relays');
+
+  function relayRow(idx){
+    const wrap = document.createElement('div');
+    wrap.className = 'relay-row';
+    wrap.innerHTML = `
+      <input type="text" class="rname" data-idx="${idx}" placeholder="Relay ${idx+1} 名稱">
+      <label class="switch"><input type="checkbox" class="rtoggle" data-idx="${idx}"><span class="slider"></span></label>
+      <button class="btn green r-on"  data-idx="${idx}">ON</button>
+      <button class="btn gray  r-off" data-idx="${idx}">OFF</button>
+    `;
+    return wrap;
+  }
+  relaysDiv.innerHTML = "";
+  for (let i=0;i<RELAY_COUNT;i++) relaysDiv.appendChild(relayRow(i));
+
+  // 滑桿 -> 立即送出
+  relaysDiv.addEventListener('change', (e)=>{
+    if(e.target.matches('.rtoggle')){
+      const idx = Number(e.target.dataset.idx);
+      const state = e.target.checked;
+      tg.sendData(JSON.stringify({ type:'relay', idx, state }));
     }
-    for(let i=0;i<RELAY_COUNT;i++) relaysDiv.appendChild(relayRow(i));
-
-    relaysDiv.addEventListener('change', (e)=>{
-      if(e.target.matches('.rtoggle')){
-        const idx = Number(e.target.dataset.idx);
-        const state = e.target.checked;
-        tg.sendData(JSON.stringify({ type:'relay', idx, state }));
-      }
-    });
-    relaysDiv.addEventListener('click', (e)=>{
-      if(e.target.matches('.r-on,.r-off')){
-        const idx = Number(e.target.dataset.idx);
-        const state = e.target.classList.contains('r-on');
-        const t = document.querySelector(`.rtoggle[data-idx="${idx}"]`); if (t) t.checked = state;
-        tg.sendData(JSON.stringify({ type:'relay', idx, state }));
-      }
-    });
-
-    // ===== GPIO 觸發推播（最多 10 組）=====
-    const notifsDiv = document.getElementById('notifs');
-    const addNotifBtn = document.getElementById('addNotif');
-    const MAX_NOTIFS = 10;
-    const PIN_OPTIONS = [0,2,4,5,13,14,16,17,18,19,21];
-
-    function oneNotifRow(pin=null, msg=''){
-      const row = document.createElement('div');
-      row.className = 'notif-row';
-      const sel = document.createElement('select'); sel.className='npin';
-      sel.innerHTML = `<option value="">腳位</option>` + PIN_OPTIONS.map(p=>`<option value="${p}" ${p===pin?'selected':''}>GPIO ${p}</option>`).join('');
-      const inp = document.createElement('input'); inp.type='text'; inp.className='nmsg'; inp.placeholder='偵測到變化時要推播的訊息'; inp.value = msg;
-      const del = document.createElement('button'); del.className='del'; del.textContent='✕'; del.onclick=()=>row.remove();
-      row.appendChild(sel); row.appendChild(inp); row.appendChild(del);
-      return row;
+  });
+  // ON/OFF 快捷鍵（並同步滑桿）
+  relaysDiv.addEventListener('click', (e)=>{
+    if(e.target.matches('.r-on,.r-off')){
+      const idx = Number(e.target.dataset.idx);
+      const state = e.target.classList.contains('r-on');
+      const t = document.querySelector(`.rtoggle[data-idx="${idx}"]`);
+      if (t) t.checked = state;
+      tg.sendData(JSON.stringify({ type:'relay', idx, state }));
     }
+  });
 
-    function addNotif(pin=null,msg=''){
-      if (notifsDiv.querySelectorAll('.notif-row').length >= MAX_NOTIFS) { alert(`已達上限（${MAX_NOTIFS}）`); return; }
-      notifsDiv.appendChild(oneNotifRow(pin,msg));
+  // ===== GPIO 觸發推播（最多 10 組）=====
+  const notifsDiv = document.getElementById('notifs');
+  const addNotifBtn = document.getElementById('addNotif');
+  const MAX_NOTIFS = 10;
+  const PIN_OPTIONS = [0,2,4,5,13,14,16,17,18,19,21];
+
+  function oneNotifRow(pin=null, msg=''){
+    const row = document.createElement('div');
+    row.className = 'notif-row';
+    row.innerHTML = `
+      <select class="npin">
+        <option value="">腳位</option>
+        ${PIN_OPTIONS.map(p=>`<option value="${p}" ${p===pin?'selected':''}>GPIO ${p}</option>`).join('')}
+      </select>
+      <input type="text" class="nmsg" placeholder="偵測到變化時要推播的訊息" value="${(msg||'').replace(/"/g,'&quot;')}">
+      <button class="del">✕</button>
+    `;
+    row.querySelector('.del').onclick=()=>row.remove();
+    return row;
+  }
+  function addNotif(pin=null,msg=''){
+    if (notifsDiv.querySelectorAll('.notif-row').length >= MAX_NOTIFS) { alert(`已達上限（${MAX_NOTIFS}）`); return; }
+    notifsDiv.appendChild(oneNotifRow(pin,msg));
+  }
+  addNotifBtn.onclick = ()=> addNotif();
+
+  // ===== 儲存（不再送 messages）=====
+  document.getElementById('save').onclick = ()=>{
+    const chat_ids = document.getElementById('chat_ids').value
+      .split(/[\n,\s]+/).map(s=>s.trim()).filter(Boolean);
+
+    const token  = document.getElementById('token').value.trim();
+
+    const relay_names = Array.from(document.querySelectorAll('.rname'))
+      .map((i,k)=> i.value.trim() || `Relay ${k+1}`);
+    const relays = Array.from(document.querySelectorAll('.rtoggle'))
+      .map(t=>t.checked);
+
+    const notifs = Array.from(document.querySelectorAll('.notif-row')).map(r=>{
+      const pin = Number(r.querySelector('.npin').value);
+      const msg = r.querySelector('.nmsg').value.trim();
+      return (pin || pin===0) && msg ? {pin, msg, en:true} : null;
+    }).filter(Boolean).slice(0, MAX_NOTIFS);
+
+    const payload = { type:'save_config', chat_ids, token, relay_names, relays, notifs };
+    const json = JSON.stringify(payload);
+    if (json.length > 3500) {   // 防止超過 Telegram WebApp 送資料上限
+      alert('設定資料過大，請刪減項目或縮短文字。');
+      return;
     }
-    addNotifBtn.onclick = ()=> addNotif();
-
-    // ===== 儲存（含 messages、relays 狀態、notifs）=====
-    document.getElementById('save').onclick = ()=>{
-      const chat_ids = document.getElementById('chat_ids').value.split(/[\n,\s]+/).map(s=>s.trim()).filter(Boolean);
-
-      const messages = Array.from(document.querySelectorAll('.msg')).map(i=>i.value).filter(Boolean).slice(0, MAX_MSGS);
-
-      const token  = document.getElementById('token').value.trim();
-
-      const relay_names = Array.from(document.querySelectorAll('.rname')).map((i,k)=> i.value.trim() || `Relay ${k+1}`);
-      const relays = Array.from(document.querySelectorAll('.rtoggle')).map(t=>t.checked);
-
-      const notifs = Array.from(document.querySelectorAll('.notif-row')).map(r=>{
-        const pin = Number(r.querySelector('.npin').value);
-        const msg = r.querySelector('.nmsg').value.trim();
-        return (pin || pin===0) && msg ? {pin, msg, en:true} : null;
-      }).filter(Boolean).slice(0, MAX_NOTIFS);
-
-      tg.sendData(JSON.stringify({ type:'save_config', chat_ids, messages, token, relay_names, relays, notifs }));
-    };
-    document.getElementById('close').onclick = ()=> tg.close();
-  </script>
+    tg.sendData(json);
+  };
+  document.getElementById('close').onclick = ()=> tg.close();
+});
+</script>
 </body>
 </html>
