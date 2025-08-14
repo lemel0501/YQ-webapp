@@ -28,11 +28,9 @@
     .rname { min-width:160px; }
     .hint { color:#6b7280; font-size:12px; }
 
-    .msg-row { display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; }
-    .msg-del { padding:8px 10px; border-radius:10px; border:none; background:#e5e7eb; cursor:pointer; }
-
-    .notif-row { display:grid; grid-template-columns: 120px 1fr auto; gap:8px; align-items:center; }
+    .notif-row { display:grid; grid-template-columns: 120px 1fr auto auto; gap:8px; align-items:center; }
     .del { padding:8px 10px; border-radius:10px; border:none; background:#e5e7eb; cursor:pointer; }
+    .chk { width:auto; }
   </style>
 </head>
 <body>
@@ -48,13 +46,13 @@
 
     <div class="card">
       <h3>推播選擇（最多 10 組）</h3>
-      <p class="hint">選擇輸入IO與要推播的訊息(Optional)。</p>
+      <p class="hint">選擇輸入 IO 與要推播的訊息（Optional）。</p>
       <div class="grid" id="notifs"></div>
       <div class="row"><button class="btn light" id="addNotif">＋新增一組</button></div>
     </div>
 
     <div class="card">
-      <h3>控制選擇(Optional)</h3>
+      <h3>控制選擇（Optional）</h3>
       <div id="relays" class="grid"></div>
       <p class="hint">滑桿＝即時切換（ON=綠、OFF=灰）；ON/OFF 為快捷鍵。對應腳位：23、25、26、27、32。</p>
     </div>
