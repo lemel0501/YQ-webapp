@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>空間001 設定</title>
+  <title>ESP32 設定</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root { --gap:12px; --radius:12px; --border:#ddd; --pad:12px; --shadow:0 4px 14px rgba(0,0,0,.06); }
@@ -12,29 +12,32 @@
     .grid { display:grid; gap:var(--gap); }
     .card { border:1px solid var(--border); border-radius: var(--radius); padding: var(--pad); box-shadow: var(--shadow); }
     .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
-    input[type=text], textarea, select { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; }
+    input[type=text], textarea { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; }
     .btn { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; color:#fff; }
-    .btn.green { background:#16a34a; } .btn.gray { background:#6b7280; } .btn.light{ background:#e5e7eb; color:#111827; }
+    .btn.primary { background:#2ea44f; }
+    .btn.blue { background:#0366d6; }
+    .btn.gray { background:#6b7280; color:#fff; }
 
-    /* 滑桿：OFF=灰、ON=綠 */
+    /* 滑桿開關 */
     .switch { position: relative; width: 56px; height: 30px; }
     .switch input { display:none; }
-    .slider { position:absolute; inset:0; background:#d1d5db; border-radius:999px; transition:.2s; }
-    .slider:before { content:""; position:absolute; height:24px; width:24px; left:3px; top:3px; background:white; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.25); }
-    .switch input:checked + .slider { background:#22c55e; }
+    .slider {
+      position:absolute; inset:0; background:#d1d5db; border-radius:999px; transition:.2s;
+    }
+    .slider:before {
+      content:""; position:absolute; height:24px; width:24px; left:3px; top:3px; background:white;
+      border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.25);
+    }
+    .switch input:checked + .slider { background:#34d399; }          /* ON 顏色 */
     .switch input:checked + .slider:before { transform:translateX(26px); }
 
     .relay-row { display:grid; grid-template-columns: 1fr auto auto auto; gap:10px; align-items:center; }
     .rname { min-width:160px; }
     .hint { color:#6b7280; font-size:12px; }
-
-    .notif-row { display:grid; grid-template-columns: 120px 1fr auto auto; gap:8px; align-items:center; }
-    .del { padding:8px 10px; border-radius:10px; border:none; background:#e5e7eb; cursor:pointer; }
-    .chk { width:auto; }
   </style>
 </head>
 <body>
-  <h2>空間001 設定（Telegram Web App）</h2>
+  <h2>ESP32 設定（Telegram Web App）</h2>
 
   <div class="grid">
 
@@ -45,16 +48,15 @@
     </div>
 
     <div class="card">
-      <h3>推播選擇（最多 10 組）</h3>
-      <p class="hint">選擇輸入 IO 與要推播的訊息（Optional）。</p>
-      <div class="grid" id="notifs"></div>
-      <div class="row"><button class="btn light" id="addNotif">＋新增一組</button></div>
+      <h3>推播訊息（示例 5 筆，可增減）</h3>
+      <div class="grid" id="msgs"></div>
+      <button class="btn blue" id="addMsg">＋新增訊息欄</button>
     </div>
 
     <div class="card">
-      <h3>控制選擇（Optional）</h3>
+      <h3>五路繼電器</h3>
       <div id="relays" class="grid"></div>
-      <p class="hint">滑桿＝即時切換（ON=綠、OFF=灰）；ON/OFF 為快捷鍵。對應腳位：23、25、26、27、32。</p>
+      <p class="hint">滑桿＝即時切換；ON/OFF 為快捷鍵。名稱可自訂。</p>
     </div>
 
     <div class="card">
@@ -63,66 +65,79 @@
     </div>
 
     <div class="row">
-      <button class="btn green" id="save">💾 儲存設定</button>
-      <button class="btn gray"  id="close">關閉</button>
+      <button class="btn primary" id="save">💾 儲存設定</button>
+      <button class="btn gray" id="close">關閉</button>
     </div>
   </div>
 
-<script>
-// 讓 tg 在非 Telegram 環境也不會拋錯
-const tg = (() => {
-  try {
-    if (window.Telegram && window.Telegram.WebApp) {
-      window.Telegram.WebApp.expand();
-      return window.Telegram.WebApp;
+  <script>
+    const tg = window.Telegram.WebApp; tg.expand();
+
+    // === 訊息欄 ===
+    const msgs = document.getElementById('msgs');
+    const addMsg = document.getElementById('addMsg');
+    function addMsgInput(val=''){ const i=document.createElement('input'); i.type='text'; i.className='msg'; i.placeholder='訊息內容'; i.value=val; msgs.appendChild(i); }
+    for(let i=0;i<5;i++) addMsgInput('');
+    addMsg.onclick = ()=> addMsgInput('');
+
+    // === 5 路繼電器：名稱 + 滑桿 + 快捷 ON/OFF ===
+    const RELAY_COUNT = 5;
+    const relaysDiv = document.getElementById('relays');
+
+    function relayRow(idx){
+      const wrap = document.createElement('div');
+      wrap.className = 'relay-row';
+      wrap.innerHTML = `
+        <input type="text" class="rname" data-idx="${idx}" placeholder="Relay ${idx+1} 名稱">
+        <label class="switch">
+          <input type="checkbox" class="rtoggle" data-idx="${idx}">
+          <span class="slider"></span>
+        </label>
+        <button class="btn blue r-on"  data-idx="${idx}">ON</button>
+        <button class="btn gray r-off" data-idx="${idx}">OFF</button>
+      `;
+      return wrap;
     }
-  } catch (e) {}
-  // fallback：提供空函式避免報錯
-  return { sendData: () => {}, close: () => {}, expand: () => {} };
-})();
 
-// 等 DOM 準備好再建立 UI（避免腳本順序問題）
-window.addEventListener('DOMContentLoaded', () => {
-  const RELAY_COUNT = 5;
-  const relaysDiv = document.getElementById('relays');
+    // 生成 5 行
+    for(let i=0;i<RELAY_COUNT;i++) relaysDiv.appendChild(relayRow(i));
 
-  // 若 #relays 不存在，直接離開（避免空指標）
-  if (!relaysDiv) return;
+    // 滑桿即時送出
+    relaysDiv.addEventListener('change', (e)=>{
+      if(e.target.matches('.rtoggle')){
+        const idx = Number(e.target.dataset.idx);
+        const state = e.target.checked;
+        tg.sendData(JSON.stringify({ type:'relay', idx, state }));
+      }
+    });
 
-  const rowHtml = (i) => `
-    <div class="relay-row">
-      <input type="text" class="rname" data-idx="${i}" placeholder="Relay ${i+1} 名稱">
-      <label class="switch">
-        <input type="checkbox" class="rtoggle" data-idx="${i}">
-        <span class="slider"></span>
-      </label>
-      <button class="btn green r-on"  data-idx="${i}">ON</button>
-      <button class="btn gray  r-off" data-idx="${i}">OFF</button>
-    </div>`;
+    // 快捷 ON/OFF 並同步滑桿
+    relaysDiv.addEventListener('click', (e)=>{
+      if(e.target.matches('.r-on,.r-off')){
+        const idx = Number(e.target.dataset.idx);
+        const state = e.target.classList.contains('r-on');
+        const toggle = document.querySelector(`.rtoggle[data-idx="${idx}"]`);
+        if (toggle) toggle.checked = state;
+        tg.sendData(JSON.stringify({ type:'relay', idx, state }));
+      }
+    });
 
-  // 建立 5 列繼電器控制
-  relaysDiv.innerHTML = "";
-  for (let i = 0; i < RELAY_COUNT; i++) relaysDiv.insertAdjacentHTML('beforeend', rowHtml(i));
+    // 儲存設定（含名稱與目前滑桿狀態）
+    document.getElementById('save').onclick = ()=>{
+      const chat_ids = document.getElementById('chat_ids').value
+        .split(/[\n,\s]+/).map(s=>s.trim()).filter(Boolean);
+      const messages = Array.from(document.querySelectorAll('.msg')).map(i=>i.value);
+      const token  = document.getElementById('token').value.trim();
 
-  // 滑桿即時送出
-  relaysDiv.addEventListener('change', (e) => {
-    if (e.target.matches('.rtoggle')) {
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.checked;
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state }));
-    }
-  });
-  // 快捷 ON/OFF 並同步滑桿
-  relaysDiv.addEventListener('click', (e) => {
-    if (e.target.matches('.r-on,.r-off')) {
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.classList.contains('r-on');
-      const t = document.querySelector(`.rtoggle[data-idx="${idx}"]`);
-      if (t) t.checked = state;
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state }));
-    }
-  });
-});
-</script>
+      const relay_names = Array.from(document.querySelectorAll('.rname'))
+        .map((i,k)=> i.value.trim() || `Relay ${k+1}`);
+      const relays = Array.from(document.querySelectorAll('.rtoggle')).map(t=>t.checked);
+
+      const data = { type:'save_config', chat_ids, messages, token, relay_names, relays };
+      tg.sendData(JSON.stringify(data));
+    };
+
+    document.getElementById('close').onclick = ()=> tg.close();
+  </script>
 </body>
 </html>
