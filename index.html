@@ -15,8 +15,8 @@
     input[type=text], textarea, select { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; }
     .btn { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; color:#fff; }
     .btn.green { background:#16a34a; } .btn.gray { background:#6b7280; } .btn.light{ background:#e5e7eb; color:#111827; }
+    .warn { position:sticky; top:0; background:#fde68a; color:#111827; padding:10px; border-radius:10px; border:1px solid #f59e0b; margin-bottom:10px; }
 
-    /* 滑桿：OFF=灰、ON=綠 */
     .switch { position: relative; width: 56px; height: 30px; }
     .switch input { display:none; }
     .slider { position:absolute; inset:0; background:#d1d5db; border-radius:999px; transition:.2s; }
@@ -25,9 +25,6 @@
     .switch input:checked + .slider:before { transform:translateX(26px); }
 
     .relay-row { display:grid; grid-template-columns: 1fr auto auto auto; gap:10px; align-items:center; }
-    .rname { min-width:160px; }
-    .hint { color:#6b7280; font-size:12px; }
-
     .notif-row { display:grid; grid-template-columns: 120px 1fr auto auto; gap:8px; align-items:center; }
     .del { padding:8px 10px; border-radius:10px; border:none; background:#e5e7eb; cursor:pointer; }
     .chk { width:auto; }
@@ -35,6 +32,10 @@
 </head>
 <body>
   <h2>空間001 設定（Telegram Web App）</h2>
+
+  <div id="envWarn" class="warn" style="display:none">
+    ⚠️ 目前不是在 Telegram 裡開啟本頁，『儲存設定』不會送到 ESP32。請回到 Telegram 對話中，按「⚙️ 開啟設定」。
+  </div>
 
   <div class="grid">
 
@@ -69,178 +70,106 @@
   </div>
 
 <script>
-// ——— 讓 Telegram WebApp 在外部瀏覽器也不會丟錯（fallback） ———
-const tg = (() => {
-  try {
-    if (window.Telegram && window.Telegram.WebApp) {
-      const app = window.Telegram.WebApp;
-      app.expand();
-      return app;
-    }
-  } catch(e){}
-  return { sendData: () => {}, close: () => {}, expand: () => {} };
-})();
+const inTelegram = !!(window.Telegram && window.Telegram.WebApp && Telegram.WebApp.initDataUnsafe);
+const tg = (() => { try {
+    if (inTelegram){ const app = Telegram.WebApp; app.expand(); return app; }
+  } catch(e){} return { sendData:()=>{}, close:()=>{}, expand:()=>{} }; })();
 
-// ——— LocalStorage 快取（帶回上次填寫） ———
-const LS_KEY = 'esp32_webapp_draft_v1';
-const PINS   = [0,2,4,5,13,14,16,17,18,19,21];   // 可選 GPIO（照你頁面提示）
+document.getElementById('envWarn').style.display = inTelegram ? 'none' : 'block';
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) || {};
-  } catch (_) { return {}; }
-}
-function saveState(s) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(_) {}
-}
+const LS_KEY='esp32_webapp_draft_v2';
+const PINS=[0,2,4,5,13,14,16,17,18,19,21];
+const RELAY_COUNT=5;
 
-// —— 工具：把 textarea 逗號/換行分隔的 chat ids 轉成陣列（送到 ESP32 時會用到） ——
-function parseChatIds(text) {
-  return (text || '')
-    .split(/[\n,; ]+/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
-function escapeHtml(s='') {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
+function loadState(){ try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):{}; }catch(_){ return {}; } }
+function saveState(s){ try{ localStorage.setItem(LS_KEY, JSON.stringify(s)); }catch(_){} }
+function parseChatIds(text){ return (text||'').split(/[\n,; ]+/).map(s=>s.trim()).filter(Boolean); }
+function esc(s=''){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 window.addEventListener('DOMContentLoaded', () => {
-  const RELAY_COUNT = 5;
-  const st = Object.assign(
-    {
-      chat_ids: '',
-      token: '',
-      // 五路繼電器：名稱 + 勾選狀態
-      relay_names: Array.from({length: RELAY_COUNT}, (_,i)=>`Relay ${i+1}`),
-      relays: Array.from({length: RELAY_COUNT}, ()=>false),
-      // GPIO 觸發推播
-      notifs: []   // 每筆 {pin:13, msg:"內容", en:true}
-    },
-    loadState()
-  );
+  const st=Object.assign({
+    chat_ids:'', token:'',
+    relay_names:Array.from({length:RELAY_COUNT},(_,i)=>`Relay ${i+1}`),
+    relays:Array.from({length:RELAY_COUNT},()=>false),
+    notifs:[]
+  }, loadState());
 
-  // ====== 1) 推播目標 Chat IDs / Token ======
-  const $chat = document.getElementById('chat_ids');
-  const $token = document.getElementById('token');
-  if ($chat)  $chat.value  = st.chat_ids || '';
-  if ($token) $token.value = st.token    || '';
+  const $chat=document.getElementById('chat_ids');
+  const $token=document.getElementById('token');
+  if($chat)  $chat.value=st.chat_ids||'';
+  if($token) $token.value=st.token||'';
+  $chat?.addEventListener('input',e=>{ st.chat_ids=e.target.value; saveState(st); });
+  $token?.addEventListener('input',e=>{ st.token=e.target.value; saveState(st); });
 
-  $chat?.addEventListener('input',  e => { st.chat_ids = e.target.value; saveState(st); });
-  $token?.addEventListener('input', e => { st.token    = e.target.value; saveState(st); });
-
-  // ====== 2) GPIO 觸發推播（最多 10 組） ======
-  const $notifs = document.getElementById('notifs');
-  const $addNotif = document.getElementById('addNotif');
-
-  function notifRowHTML(i, n) {
-    const opts = PINS.map(p => `<option value="${p}" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
-    return `
-      <div class="notif-row" data-i="${i}">
-        <select class="npin">${opts}</select>
-        <input class="nmsg" type="text" placeholder="推播訊息" value="${escapeHtml(n.msg||'')}">
-        <label class="row" style="gap:6px">
-          <input class="nen chk" type="checkbox" ${n.en!==false?'checked':''}> 啟用
-        </label>
-        <button class="del" title="刪除">✕</button>
-      </div>`;
+  // ===== Notifs =====
+  const $notifs=document.getElementById('notifs'), $add=document.getElementById('addNotif');
+  function notifRowHTML(i,n){
+    const opts=PINS.map(p=>`<option value="${p}" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
+    return `<div class="notif-row" data-i="${i}">
+      <select class="npin">${opts}</select>
+      <input class="nmsg" type="text" placeholder="推播訊息" value="${esc(n.msg||'')}">
+      <label class="row" style="gap:6px"><input class="nen chk" type="checkbox" ${n.en!==false?'checked':''}> 啟用</label>
+      <button class="del" title="刪除">✕</button></div>`;
   }
-  function renderNotifs() {
-    if (!$notifs) return;
-    $notifs.innerHTML = st.notifs.map((n,i)=>notifRowHTML(i,n)).join('');
-  }
+  function renderNotifs(){ if(!$notifs) return; $notifs.innerHTML=st.notifs.map((n,i)=>notifRowHTML(i,n)).join(''); }
   renderNotifs();
-
-  $addNotif?.addEventListener('click', () => {
-    if (st.notifs.length >= 10) return;
-    st.notifs.push({pin:13, msg:'', en:true});
-    saveState(st); renderNotifs();
-  });
-
-  $notifs?.addEventListener('change', (e) => {
-    const $row = e.target.closest('.notif-row'); if (!$row) return;
-    const i = Number($row.dataset.i);
-    if (e.target.classList.contains('npin'))  st.notifs[i].pin = Number(e.target.value);
-    if (e.target.classList.contains('nen'))   st.notifs[i].en  = !!e.target.checked;
+  $add?.addEventListener('click',()=>{ if(st.notifs.length>=10) return; st.notifs.push({pin:13,msg:'',en:true}); saveState(st); renderNotifs(); });
+  $notifs?.addEventListener('change',e=>{
+    const $row=e.target.closest('.notif-row'); if(!$row) return; const i=+$row.dataset.i;
+    if(e.target.classList.contains('npin')) st.notifs[i].pin=+e.target.value;
+    if(e.target.classList.contains('nen')) st.notifs[i].en=!!e.target.checked;
     saveState(st);
   });
-  $notifs?.addEventListener('input', (e) => {
-    const $row = e.target.closest('.notif-row'); if (!$row) return;
-    const i = Number($row.dataset.i);
-    if (e.target.classList.contains('nmsg')) st.notifs[i].msg = e.target.value;
-    saveState(st);
+  $notifs?.addEventListener('input',e=>{
+    const $row=e.target.closest('.notif-row'); if(!$row) return; const i=+$row.dataset.i;
+    if(e.target.classList.contains('nmsg')) st.notifs[i].msg=e.target.value; saveState(st);
   });
-  $notifs?.addEventListener('click', (e) => {
-    if (!e.target.classList.contains('del')) return;
-    const i = Number(e.target.closest('.notif-row').dataset.i);
-    st.notifs.splice(i,1);
-    saveState(st); renderNotifs();
+  $notifs?.addEventListener('click',e=>{
+    if(!e.target.classList.contains('del')) return;
+    const i=+e.target.closest('.notif-row').dataset.i; st.notifs.splice(i,1); saveState(st); renderNotifs();
   });
 
-  // ====== 3) 五路繼電器（名稱 + 即時切換 + 快捷鍵） ======
-  const $relays = document.getElementById('relays');
-  if ($relays) {
-    const rowHtml = (i) => `
-      <div class="relay-row">
-        <input type="text" class="rname" data-idx="${i}" placeholder="Relay ${i+1} 名稱" value="${escapeHtml(st.relay_names?.[i]||`Relay ${i+1}`)}">
-        <label class="switch">
-          <input type="checkbox" class="rtoggle" data-idx="${i}" ${st.relays?.[i] ? 'checked' : ''}>
-          <span class="slider"></span>
-        </label>
-        <button class="btn green r-on"  data-idx="${i}">ON</button>
-        <button class="btn gray  r-off" data-idx="${i}">OFF</button>
-      </div>`;
-    $relays.innerHTML = Array.from({length: RELAY_COUNT}, (_,i)=>rowHtml(i)).join('');
-
-    // 滑桿即時送出 + 存快取
-    $relays.addEventListener('change', (e) => {
-      if (!e.target.matches('.rtoggle')) return;
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.checked;
-      st.relays[idx] = state;      // 存本地
-      saveState(st);
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state })); // 立即控制
+  // ===== Relays =====
+  const $relays=document.getElementById('relays');
+  if($relays){
+    const row = i => `<div class="relay-row">
+      <input type="text" class="rname" data-idx="${i}" placeholder="Relay ${i+1} 名稱" value="${esc(st.relay_names?.[i]||`Relay ${i+1}`)}">
+      <label class="switch"><input type="checkbox" class="rtoggle" data-idx="${i}" ${st.relays?.[i]?'checked':''}><span class="slider"></span></label>
+      <button class="btn green r-on"  data-idx="${i}">ON</button>
+      <button class="btn gray  r-off" data-idx="${i}">OFF</button></div>`;
+    $relays.innerHTML = Array.from({length:RELAY_COUNT},(_,i)=>row(i)).join('');
+    $relays.addEventListener('change', e=>{
+      if(!e.target.matches('.rtoggle')) return; const i=+e.target.dataset.idx; const state=!!e.target.checked;
+      st.relays[i]=state; saveState(st);
+      tg.sendData(JSON.stringify({type:'relay', idx:i, state}));
     });
-    // 名稱變更存快取
-    $relays.addEventListener('input', (e) => {
-      if (!e.target.matches('.rname')) return;
-      const idx = Number(e.target.dataset.idx);
-      st.relay_names[idx] = e.target.value;
-      saveState(st);
+    $relays.addEventListener('input', e=>{
+      if(!e.target.matches('.rname')) return; const i=+e.target.dataset.idx; st.relay_names[i]=e.target.value; saveState(st);
     });
-    // 快捷 ON/OFF 並同步滑桿 + 存快取
-    $relays.addEventListener('click', (e) => {
-      if (!e.target.matches('.r-on,.r-off')) return;
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.classList.contains('r-on');
-      const t = $relays.querySelector(`.rtoggle[data-idx="${idx}"]`);
-      if (t) { t.checked = state; st.relays[idx] = state; saveState(st); }
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state }));
+    $relays.addEventListener('click', e=>{
+      if(!e.target.matches('.r-on,.r-off')) return; const i=+e.target.dataset.idx; const state=e.target.classList.contains('r-on');
+      const t=$relays.querySelector(`.rtoggle[data-idx="${i}"]`); if(t){ t.checked=state; st.relays[i]=state; saveState(st); }
+      tg.sendData(JSON.stringify({type:'relay', idx:i, state}));
     });
   }
 
-  // ====== 4) 儲存設定 → 傳給 ESP32，同時保留在 localStorage ======
-  document.getElementById('save')?.addEventListener('click', () => {
-    // 先固化一次快取
-    st.chat_ids = $chat?.value || '';
-    st.token    = $token?.value || '';
-    saveState(st);
-
-    // 打包送給 ESP32（你的韌體已支援的欄位）
+  // ===== Save =====
+  document.getElementById('save')?.addEventListener('click', ()=>{
+    if(!inTelegram){ alert("請在 Telegram 對話內的 WebApp 開啟本頁再儲存。"); return; }
+    st.chat_ids = $chat?.value||''; st.token = $token?.value||''; saveState(st);
     const payload = {
-      type: 'save_config',
+      type:'save_config',
       chat_ids: parseChatIds(st.chat_ids),
       token: st.token,
       relay_names: st.relay_names,
       relays: st.relays,
-      notifs: (st.notifs || []).map(n => ({ pin: n.pin, msg: n.msg || '', en: n.en !== false }))
+      notifs: (st.notifs||[]).map(n=>({pin:n.pin, msg:n.msg||'', en:n.en!==false}))
     };
     tg.sendData(JSON.stringify(payload));
+    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('soft');
+    if (tg.showPopup) tg.showPopup({title:"已送出", message:"設定已送到機器人，請用 /show 查看 revision 是否更新。"});
   });
-
-  document.getElementById('close')?.addEventListener('click', () => tg.close());
+  document.getElementById('close')?.addEventListener('click', ()=>tg.close());
 });
 </script>
 </body>
