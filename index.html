@@ -1,9 +1,10 @@
-<!doctype html>
+# Write the revised HTML to a new file for the user to download
+content = """<!doctype html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>空間001 設定</title>
+  <title>YQ_Notifi</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root { --gap:12px; --radius:12px; --border:#ddd; --pad:12px; --shadow:0 4px 14px rgba(0,0,0,.06); }
@@ -24,7 +25,8 @@
     .switch input:checked + .slider { background:#22c55e; }
     .switch input:checked + .slider:before { transform:translateX(26px); }
 
-    .relay-row { display:grid; grid-template-columns: 1fr auto auto auto; gap:10px; align-items:center; }
+    /* 只保留「名稱 + 滑桿」兩欄 */
+    .relay-row { display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:center; }
     .rname { min-width:160px; }
     .hint { color:#6b7280; font-size:12px; }
 
@@ -34,32 +36,21 @@
   </style>
 </head>
 <body>
-  <h2>空間001 設定（Telegram Web App）</h2>
+  <h2>YQ_Notifi</h2>
 
   <div class="grid">
 
     <div class="card">
-      <h3>推播目標 Chat IDs</h3>
-      <p class="hint">可填多個，逗號或換行分隔（個人或群組 ID）。</p>
-      <textarea id="chat_ids" rows="3" placeholder="-1001234567890, 123456789"></textarea>
+      <h3>控制選擇（Optional）</h3>
+      <div id="relays" class="grid"></div>
+      <p class="hint">滑桿＝即時切換（ON=綠、OFF=灰）。對應腳位：23、25、26、27、32。</p>
     </div>
 
     <div class="card">
       <h3>推播選擇（最多 10 組）</h3>
-      <p class="hint">選擇輸入 IO 與要推播的訊息（Optional）。</p>
+      <p class="hint">選擇編號及欲推播的訊息。</p>
       <div class="grid" id="notifs"></div>
       <div class="row"><button class="btn light" id="addNotif">＋新增一組</button></div>
-    </div>
-
-    <div class="card">
-      <h3>控制選擇（Optional）</h3>
-      <div id="relays" class="grid"></div>
-      <p class="hint">滑桿＝即時切換（ON=綠、OFF=灰）；ON/OFF 為快捷鍵。對應腳位：23、25、26、27、32。</p>
-    </div>
-
-    <div class="card">
-      <h3>（可選）更換 Bot Token</h3>
-      <input id="token" type="text" placeholder="若更換將自動重啟生效" />
     </div>
 
     <div class="row">
@@ -83,7 +74,7 @@ const tg = (() => {
 
 // ——— LocalStorage 快取（帶回上次填寫） ———
 const LS_KEY = 'esp32_webapp_draft_v1';
-const PINS   = [0,2,4,5,13,14,16,17,18,19,21];   // 可選 GPIO（照你頁面提示）
+const PINS   = [0,2,4,5,13,14,16,17,18,19,21];   // 可選 GPIO
 
 function loadState() {
   try {
@@ -95,25 +86,15 @@ function loadState() {
 function saveState(s) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(_) {}
 }
-
-// —— 工具：把 textarea 逗號/換行分隔的 chat ids 轉成陣列（送到 ESP32 時會用到） ——
-function parseChatIds(text) {
-  return (text || '')
-    .split(/[\n,; ]+/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
 function escapeHtml(s='') {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return s.replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   const RELAY_COUNT = 5;
   const st = Object.assign(
     {
-      chat_ids: '',
-      token: '',
-      // 五路繼電器：名稱 + 勾選狀態
+      // 五路繼電器：名稱 + 狀態
       relay_names: Array.from({length: RELAY_COUNT}, (_,i)=>`Relay ${i+1}`),
       relays: Array.from({length: RELAY_COUNT}, ()=>false),
       // GPIO 觸發推播
@@ -122,29 +103,20 @@ window.addEventListener('DOMContentLoaded', () => {
     loadState()
   );
 
-  // ====== 1) 推播目標 Chat IDs / Token ======
-  const $chat = document.getElementById('chat_ids');
-  const $token = document.getElementById('token');
-  if ($chat)  $chat.value  = st.chat_ids || '';
-  if ($token) $token.value = st.token    || '';
-
-  $chat?.addEventListener('input',  e => { st.chat_ids = e.target.value; saveState(st); });
-  $token?.addEventListener('input', e => { st.token    = e.target.value; saveState(st); });
-
-  // ====== 2) GPIO 觸發推播（最多 10 組） ======
+  // ====== 1) GPIO 觸發推播（最多 10 組） ======
   const $notifs = document.getElementById('notifs');
   const $addNotif = document.getElementById('addNotif');
 
   function notifRowHTML(i, n) {
-    const opts = PINS.map(p => `<option value="${p}" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
+    const opts = PINS.map(p => `<option value=\"${p}\" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
     return `
-      <div class="notif-row" data-i="${i}">
-        <select class="npin">${opts}</select>
-        <input class="nmsg" type="text" placeholder="推播訊息" value="${escapeHtml(n.msg||'')}">
-        <label class="row" style="gap:6px">
-          <input class="nen chk" type="checkbox" ${n.en!==false?'checked':''}> 啟用
+      <div class=\"notif-row\" data-i=\"${i}\">
+        <select class=\"npin\">${opts}</select>
+        <input class=\"nmsg\" type=\"text\" placeholder=\"推播訊息\" value=\"${escapeHtml(n.msg||'')}\">
+        <label class=\"row\" style=\"gap:6px\">
+          <input class=\"nen chk\" type=\"checkbox\" ${n.en!==false?'checked':''}> 啟用
         </label>
-        <button class="del" title="刪除">✕</button>
+        <button class=\"del\" title=\"刪除\">✕</button>
       </div>`;
   }
   function renderNotifs() {
@@ -179,18 +151,16 @@ window.addEventListener('DOMContentLoaded', () => {
     saveState(st); renderNotifs();
   });
 
-  // ====== 3) 五路繼電器（名稱 + 即時切換 + 快捷鍵） ======
+  // ====== 2) 五路繼電器（名稱 + 即時切換） ======
   const $relays = document.getElementById('relays');
   if ($relays) {
     const rowHtml = (i) => `
-      <div class="relay-row">
-        <input type="text" class="rname" data-idx="${i}" placeholder="Relay ${i+1} 名稱" value="${escapeHtml(st.relay_names?.[i]||`Relay ${i+1}`)}">
-        <label class="switch">
-          <input type="checkbox" class="rtoggle" data-idx="${i}" ${st.relays?.[i] ? 'checked' : ''}>
-          <span class="slider"></span>
+      <div class=\"relay-row\">
+        <input type=\"text\" class=\"rname\" data-idx=\"${i}\" placeholder=\"Relay ${i+1} 名稱\" value=\"${escapeHtml(st.relay_names?.[i]||`Relay ${i+1}`)}\">
+        <label class=\"switch\">
+          <input type=\"checkbox\" class=\"rtoggle\" data-idx=\"${i}\" ${st.relays?.[i] ? 'checked' : ''}>
+          <span class=\"slider\"></span>
         </label>
-        <button class="btn green r-on"  data-idx="${i}">ON</button>
-        <button class="btn gray  r-off" data-idx="${i}">OFF</button>
       </div>`;
     $relays.innerHTML = Array.from({length: RELAY_COUNT}, (_,i)=>rowHtml(i)).join('');
 
@@ -210,29 +180,16 @@ window.addEventListener('DOMContentLoaded', () => {
       st.relay_names[idx] = e.target.value;
       saveState(st);
     });
-    // 快捷 ON/OFF 並同步滑桿 + 存快取
-    $relays.addEventListener('click', (e) => {
-      if (!e.target.matches('.r-on,.r-off')) return;
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.classList.contains('r-on');
-      const t = $relays.querySelector(`.rtoggle[data-idx="${idx}"]`);
-      if (t) { t.checked = state; st.relays[idx] = state; saveState(st); }
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state }));
-    });
   }
 
-  // ====== 4) 儲存設定 → 傳給 ESP32，同時保留在 localStorage ======
+  // ====== 3) 儲存設定 → 傳給 ESP32，同時保留在 localStorage ======
   document.getElementById('save')?.addEventListener('click', () => {
     // 先固化一次快取
-    st.chat_ids = $chat?.value || '';
-    st.token    = $token?.value || '';
     saveState(st);
 
     // 打包送給 ESP32（你的韌體已支援的欄位）
     const payload = {
       type: 'save_config',
-      chat_ids: parseChatIds(st.chat_ids),
-      token: st.token,
       relay_names: st.relay_names,
       relays: st.relays,
       notifs: (st.notifs || []).map(n => ({ pin: n.pin, msg: n.msg || '', en: n.en !== false }))
@@ -245,3 +202,9 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+"""
+path = "/mnt/data/index_clean.html"
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+
+path
