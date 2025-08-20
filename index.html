@@ -1,4 +1,4 @@
-content = """<!doctype html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
@@ -11,24 +11,23 @@ content = """<!doctype html>
     h2 { margin: 0 0 8px; }
     .grid { display:grid; gap:var(--gap); }
     .card { border:1px solid var(--border); border-radius: var(--radius); padding: var(--pad); box-shadow: var(--shadow); }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
     input[type=text], textarea, select { width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; }
     .btn { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; color:#fff; }
     .btn.green { background:#16a34a; } .btn.gray { background:#6b7280; } .btn.light{ background:#e5e7eb; color:#111827; }
+    .hint { color:#6b7280; font-size:12px; }
 
-    /* 滑桿：OFF=灰、ON=綠 */
+    /* === Slider (保留) === */
+    .relay-row { display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:center; }
+    .rname { min-width:160px; }
+
     .switch { position: relative; width: 56px; height: 30px; }
-    .switch input { display:none; }
-    .slider { position:absolute; inset:0; background:#d1d5db; border-radius:999px; transition:.2s; }
-    .slider:before { content:""; position:absolute; height:24px; width:24px; left:3px; top:3px; background:white; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+    .switch input[type=checkbox] { position:absolute; opacity:0; width:0; height:0; } /* 保留但隱藏原始 checkbox */
+    .slider { position:absolute; inset:0; background:#d1d5db; border-radius:999px; transition:background .2s ease; }
+    .slider:before { content:""; position:absolute; height:24px; width:24px; left:3px; top:3px; background:white; border-radius:50%; transition:transform .2s ease; box-shadow:0 1px 3px rgba(0,0,0,.25); }
     .switch input:checked + .slider { background:#22c55e; }
     .switch input:checked + .slider:before { transform:translateX(26px); }
 
-    /* 只保留「名稱 + 滑桿」兩欄 */
-    .relay-row { display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:center; }
-    .rname { min-width:160px; }
-    .hint { color:#6b7280; font-size:12px; }
-
+    /* 推播組 */
     .notif-row { display:grid; grid-template-columns: 120px 1fr auto auto; gap:8px; align-items:center; }
     .del { padding:8px 10px; border-radius:10px; border:none; background:#e5e7eb; cursor:pointer; }
     .chk { width:auto; }
@@ -39,10 +38,11 @@ content = """<!doctype html>
 
   <div class="grid">
 
+    <!-- 控制選擇：保留「名稱 + 滑桿」；移除 ON/OFF 按鈕 -->
     <div class="card">
       <h3>控制選擇</h3>
       <div id="relays" class="grid"></div>
-      <p class="hint">滑桿＝即時切換（ON=綠、OFF=灰）。對應腳位：23、25、26、27、32。</p>
+      <p class="hint">使用滑桿切換（ON=綠、OFF=灰）。</p>
     </div>
 
     <div class="card">
@@ -59,7 +59,7 @@ content = """<!doctype html>
   </div>
 
 <script>
-// ——— 讓 Telegram WebApp 在外部瀏覽器也不會丟錯（fallback） ———
+// Telegram WebApp 物件（fallback 讓外部瀏覽器也能運作畫面）
 const tg = (() => {
   try {
     if (window.Telegram && window.Telegram.WebApp) {
@@ -71,8 +71,7 @@ const tg = (() => {
   return { sendData: () => {}, close: () => {}, expand: () => {} };
 })();
 
-// ——— LocalStorage 快取（帶回上次填寫） ———
-const LS_KEY = 'esp32_webapp_draft_v1';
+const LS_KEY = 'esp32_webapp_draft_v2';
 const PINS   = [0,2,4,5,13,14,16,17,18,19,21];   // 可選 GPIO
 
 function loadState() {
@@ -86,41 +85,70 @@ function saveState(s) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(_) {}
 }
 function escapeHtml(s='') {
-  return s.replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));
+  return (s||'').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   const RELAY_COUNT = 5;
   const st = Object.assign(
     {
-      // 五路繼電器：名稱 + 狀態
       relay_names: Array.from({length: RELAY_COUNT}, (_,i)=>`Relay ${i+1}`),
       relays: Array.from({length: RELAY_COUNT}, ()=>false),
-      // GPIO 觸發推播
-      notifs: []   // 每筆 {pin:13, msg:"內容", en:true}
+      notifs: []
     },
     loadState()
   );
 
-  // ====== 1) GPIO 觸發推播（最多 10 組） ======
+  // 渲染「控制 + 滑桿」
+  const $relays = document.getElementById('relays');
+  if ($relays) {
+    const rowHtml = (i) => `
+      <div class="relay-row">
+        <input type="text" class="rname" data-idx="${i}" placeholder="Relay ${i+1} 名稱" value="${escapeHtml(st.relay_names?.[i]||`Relay ${i+1}`)}">
+        <label class="switch">
+          <input type="checkbox" class="rtoggle" data-idx="${i}" ${st.relays?.[i] ? 'checked' : ''}>
+          <span class="slider"></span>
+        </label>
+      </div>`;
+    $relays.innerHTML = Array.from({length: RELAY_COUNT}, (_,i)=>rowHtml(i)).join('');
+
+    // 滑桿切換 → 立刻送出到 ESP32
+    $relays.addEventListener('change', (e) => {
+      if (!e.target.matches('.rtoggle')) return;
+      const idx = Number(e.target.dataset.idx);
+      const state = !!e.target.checked;
+      st.relays[idx] = state;
+      saveState(st);
+      tg.sendData(JSON.stringify({ type: 'relay', idx, state }));
+    });
+
+    // 名稱變更存快取
+    $relays.addEventListener('input', (e) => {
+      if (!e.target.matches('.rname')) return;
+      const idx = Number(e.target.dataset.idx);
+      st.relay_names[idx] = e.target.value;
+      saveState(st);
+    });
+  }
+
+  // 渲染推播設定
   const $notifs = document.getElementById('notifs');
   const $addNotif = document.getElementById('addNotif');
-
   function notifRowHTML(i, n) {
-    const opts = PINS.map(p => `<option value=\"${p}\" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
+    const opts = PINS.map(p => `<option value="${p}" ${p===n.pin?'selected':''}>GPIO ${p}</option>`).join('');
     return `
-      <div class=\"notif-row\" data-i=\"${i}\">
-        <select class=\"npin\">${opts}</select>
-        <input class=\"nmsg\" type=\"text\" placeholder=\"推播訊息\" value=\"${escapeHtml(n.msg||'')}\">
-        <label class=\"row\" style=\"gap:6px\">
-          <input class=\"nen chk\" type=\"checkbox\" ${n.en!==false?'checked':''}> 啟用
+      <div class="notif-row" data-i="${i}">
+        <select class="npin">${opts}</select>
+        <input class="nmsg" type="text" placeholder="推播訊息" value="${escapeHtml(n.msg||'')}">
+        <label class="row" style="gap:6px">
+          <input class="nen chk" type="checkbox" ${n.en!==false?'checked':''}> 啟用
         </label>
-        <button class=\"del\" title=\"刪除\">✕</button>
+        <button class="del" title="刪除">✕</button>
       </div>`;
   }
   function renderNotifs() {
     if (!$notifs) return;
-    $notifs.innerHTML = st.notifs.map((n,i)=>notifRowHTML(i,n)).join('');
+    $notifs.innerHTML = (st.notifs||[]).map((n,i)=>notifRowHTML(i,n)).join('');
   }
   renderNotifs();
 
@@ -150,43 +178,9 @@ window.addEventListener('DOMContentLoaded', () => {
     saveState(st); renderNotifs();
   });
 
-  // ====== 2) 五路繼電器（名稱 + 即時切換） ======
-  const $relays = document.getElementById('relays');
-  if ($relays) {
-    const rowHtml = (i) => `
-      <div class=\"relay-row\">
-        <input type=\"text\" class=\"rname\" data-idx=\"${i}\" placeholder=\"Relay ${i+1} 名稱\" value=\"${escapeHtml(st.relay_names?.[i]||`Relay ${i+1}`)}\">
-        <label class=\"switch\">
-          <input type=\"checkbox\" class=\"rtoggle\" data-idx=\"${i}\" ${st.relays?.[i] ? 'checked' : ''}>
-          <span class=\"slider\"></span>
-        </label>
-      </div>`;
-    $relays.innerHTML = Array.from({length: RELAY_COUNT}, (_,i)=>rowHtml(i)).join('');
-
-    // 滑桿即時送出 + 存快取
-    $relays.addEventListener('change', (e) => {
-      if (!e.target.matches('.rtoggle')) return;
-      const idx = Number(e.target.dataset.idx);
-      const state = e.target.checked;
-      st.relays[idx] = state;      // 存本地
-      saveState(st);
-      tg.sendData(JSON.stringify({ type: 'relay', idx, state })); // 立即控制
-    });
-    // 名稱變更存快取
-    $relays.addEventListener('input', (e) => {
-      if (!e.target.matches('.rname')) return;
-      const idx = Number(e.target.dataset.idx);
-      st.relay_names[idx] = e.target.value;
-      saveState(st);
-    });
-  }
-
-  // ====== 3) 儲存設定 → 傳給 ESP32，同時保留在 localStorage ======
+  // 儲存設定
   document.getElementById('save')?.addEventListener('click', () => {
-    // 先固化一次快取
     saveState(st);
-
-    // 打包送給 ESP32（你的韌體已支援的欄位）
     const payload = {
       type: 'save_config',
       relay_names: st.relay_names,
@@ -201,4 +195,3 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
-
