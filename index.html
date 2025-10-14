@@ -30,17 +30,94 @@
     </div>
   </div>
 
-  <div class="card">
-    <h3>🔔 繼電器推播訊息（mon0..5）</h3>
-    <div class="grid">
-      <div><label>CH1 訊息</label><input id="mon0" placeholder="Relay 1"></div>
-      <div><label>CH2 訊息</label><input id="mon1" placeholder="Relay 2"></div>
-      <div><label>CH3 訊息</label><input id="mon2" placeholder="Relay 3"></div>
-      <div><label>CH4 訊息</label><input id="mon3" placeholder="Relay 4"></div>
-      <div><label>CH5 訊息</label><input id="mon4" placeholder="Relay 5"></div>
-      <div><label>CH6 訊息</label><input id="mon5" placeholder="Relay 6"></div>
+<!-- 🕒 定時排程（WebApp 版）：六路 HH:MM 與 保持時間 -->
+<div class="card">
+  <h3>🕒 定時排程（CH1~CH6）</h3>
+  <p style="margin:.2em 0 .8em;color:#5b6b5f">設定每一路的觸發時間（HH:MM）與保持時間（分、秒；上限 3600 秒）。</p>
+
+  <div class="grid">
+    <!-- 6 路，兩欄一排 -->
+    <div>
+      <label>CH1 時間（t0）</label><input id="t0" placeholder="07:30">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm0）</label><input id="hm0" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs0）</label><input id="hs0" type="number" min="0" max="3600" value="5"></div>
+      </div>
+    </div>
+
+    <div>
+      <label>CH2 時間（t1）</label><input id="t1" placeholder="08:00">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm1）</label><input id="hm1" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs1）</label><input id="hs1" type="number" min="0" max="3600" value="5"></div>
+      </div>
+    </div>
+
+    <div>
+      <label>CH3 時間（t2）</label><input id="t2" placeholder="09:00">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm2）</label><input id="hm2" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs2）</label><input id="hs2" type="number" min="0" max="3600" value="5"></div>
+      </div>
+    </div>
+
+    <div>
+      <label>CH4 時間（t3）</label><input id="t3" placeholder="10:00">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm3）</label><input id="hm3" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs3）</label><input id="hs3" type="number" min="0" max="3600" value="5"></div>
+      </div>
+    </div>
+
+    <div>
+      <label>CH5 時間（t4）</label><input id="t4" placeholder="11:00">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm4）</label><input id="hm4" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs4）</label><input id="hs4" type="number" min="0" max="3600" value="5"></div>
+      </div>
+    </div>
+
+    <div>
+      <label>CH6 時間（t5）</label><input id="t5" placeholder="12:00">
+      <div class="row" style="margin-top:6px">
+        <div><label>分（hm5）</label><input id="hm5" type="number" min="0" max="59" value="0"></div>
+        <div><label>秒（hs5）</label><input id="hs5" type="number" min="0" max="3600" value="5"></div>
+      </div>
     </div>
   </div>
+</div>
+
+<script>
+(function(){
+  const tg = window.Telegram && window.Telegram.WebApp;
+
+  function val(id){ return (document.getElementById(id)?.value || "").trim(); }
+  function num(id,min,max,def=0){
+    let n = parseInt(val(id)||def,10); if (isNaN(n)) n = def;
+    if (min!=null) n = Math.max(min,n);
+    if (max!=null) n = Math.min(max,n);
+    return n;
+  }
+
+  // ★★★ 新版：收集 t[] / hm[] / hs[]。其餘（星期/計數器）若你還要，就照舊加入。
+  function collect(){
+    const t=[], hm=[], hs=[];
+    for (let i=0;i<6;i++){
+      t.push(val("t"+i));                         // "HH:MM"
+      hm.push(num("hm"+i,0,59,0));                // 0..59
+      hs.push(num("hs"+i,0,3600,0));              // 0..3600
+    }
+    return { t, hm, hs };   // ← 傳回給韌體
+  }
+
+  document.getElementById('send').addEventListener('click', function(){
+    const data = JSON.stringify(collect());
+    if (tg && tg.sendData){ tg.sendData(data); tg.close(); }
+    else alert("請從 Telegram 內開啟此頁（WebApp）");
+  });
+})();
+</script>
+
 
   <div class="card">
     <h3>🧮 計數器設定</h3>
@@ -98,3 +175,4 @@
 })();
 </script>
 </body>
+
