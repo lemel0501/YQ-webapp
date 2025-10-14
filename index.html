@@ -91,32 +91,43 @@
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
 
-  function val(id){ return (document.getElementById(id)?.value || "").trim(); }
-  function num(id,min,max,def=0){
-    let n = parseInt(val(id)||def,10); if (isNaN(n)) n = def;
-    if (min!=null) n = Math.max(min,n);
-    if (max!=null) n = Math.min(max,n);
-    return n;
-  }
-
-  // ★★★ 新版：收集 t[] / hm[] / hs[]。其餘（星期/計數器）若你還要，就照舊加入。
   function collect(){
-    const t=[], hm=[], hs=[];
-    for (let i=0;i<6;i++){
-      t.push(val("t"+i));                         // "HH:MM"
-      hm.push(num("hm"+i,0,59,0));                // 0..59
-      hs.push(num("hs"+i,0,3600,0));              // 0..3600
+    // 星期（如果你還保留那張卡，否則可拿掉）
+    const wd = [];
+    for (let i=0;i<7;i++){
+      const el = document.getElementById('wd'+i);
+      if (el) wd.push(el.checked ? 1 : 0);
     }
-    return { t, hm, hs };   // ← 傳回給韌體
+
+    // 6 路時間/保持（分/秒）
+    const ts = [], hm = [], hs = [];
+    for (let i=0;i<6;i++){
+      ts.push((document.getElementById('t'+i)?.value || "").trim());
+      hm.push(parseInt(document.getElementById('hm'+i)?.value || "0",10) || 0);
+      hs.push(parseInt(document.getElementById('hs'+i)?.value || "0",10) || 0);
+    }
+
+    // 若你還保留計數器卡片，也一起帶上（可留可去）
+    const cm0 = document.getElementById('cm0')?.value || "";
+    const cn0 = parseInt(document.getElementById('cn0')?.value || "0",10) || 0;
+    const ct1 = (document.getElementById('ct1')?.value || "").trim();
+    const cm1 = document.getElementById('cm1')?.value || "";
+
+    return { wd, ts, hm, hs, cm0, cn0, ct1, cm1 };
   }
 
   document.getElementById('send').addEventListener('click', function(){
+    if (!(tg && tg.sendData)) {
+      alert("請從 Telegram 內開啟此頁（WebApp），外部瀏覽器無法送出。");
+      return;
+    }
     const data = JSON.stringify(collect());
-    if (tg && tg.sendData){ tg.sendData(data); tg.close(); }
-    else alert("請從 Telegram 內開啟此頁（WebApp）");
+    tg.sendData(data);   // 回傳到聊天 → 裝置 getUpdates 撈 web_app_data
+    tg.close();
   });
 })();
 </script>
+
 
 
   <div class="card">
@@ -175,4 +186,5 @@
 })();
 </script>
 </body>
+
 
