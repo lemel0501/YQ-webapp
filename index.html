@@ -159,32 +159,62 @@
 
 <script>
 (function(){
-  function pad2(n){return String(n).padStart(2,'0')}
-  // Telegram WebApp SDK（由 Telegram 客戶端注入）
+  // 1) 取得 Telegram WebApp 物件
   const tg = window.Telegram && window.Telegram.WebApp;
-  // 將表單收集成 JSON
+
+  // 2) 必做：宣告就緒、展開畫面（避免高度太小看不到按鈕）
+  if (tg && tg.ready) tg.ready();
+  if (tg && tg.expand) tg.expand();
+
+  // 3) 收集表單
   function collect(){
+    // 星期 (若你有保留)
     const wd = [];
-    for (let i=0;i<7;i++) wd.push(document.getElementById('wd'+i).checked ? 1 : 0);
-    const mon = [];
-    for (let i=0;i<6;i++) mon.push(document.getElementById('mon'+i).value||"");
-    const cm0 = document.getElementById('cm0').value||"";
-    const cn0 = parseInt(document.getElementById('cn0').value||"0",10)||0;
-    const ct1 = (document.getElementById('ct1').value||"").trim();
-    const cm1 = document.getElementById('cm1').value||"";
-    return {wd, mon, cm0, cn0, ct1, cm1};
-  }
-  document.getElementById('send').addEventListener('click', function(){
-    const data = JSON.stringify(collect());
-    if (tg && tg.sendData){
-      tg.sendData(data);     // ★ 送回聊天 → ESP 以 getUpdates 撈到 web_app_data
-      tg.close();
-    }else{
-      alert("請從 Telegram 內開啟此頁（WebApp）");
+    for (let i=0;i<7;i++){
+      const el = document.getElementById('wd'+i);
+      if (el) wd.push(el.checked ? 1 : 0);
     }
+    // 6 路：時間/保持
+    const ts = [], hm = [], hs = [];
+    for (let i=0;i<6;i++){
+      ts.push((document.getElementById('t'+i)?.value || "").trim());
+      hm.push(parseInt(document.getElementById('hm'+i)?.value || "0",10) || 0);
+      hs.push(parseInt(document.getElementById('hs'+i)?.value || "0",10) || 0);
+    }
+    // 計數器（若你保留）
+    const cm0 = document.getElementById('cm0')?.value || "";
+    const cn0 = parseInt(document.getElementById('cn0')?.value || "0",10) || 0;
+    const ct1 = (document.getElementById('ct1')?.value || "").trim();
+    const cm1 = document.getElementById('cm1')?.value || "";
+    return { wd, ts, hm, hs, cm0, cn0, ct1, cm1 };
+  }
+
+  // 4) 綁定「送出到裝置」按鈕
+  const btn = document.getElementById('send');
+  btn.addEventListener('click', function(){
+    if (!(tg && tg.sendData)) {
+      alert("請從 Telegram 內開啟此頁（點聊天裡的「⚙️ 開啟設定」），外部瀏覽器無法送出。");
+      return;
+    }
+    const data = JSON.stringify(collect());
+
+    // 即時顯示確認（用於你現在的情況：你按了沒反應）
+    if (tg.showAlert) tg.showAlert("已送出設定到聊天，裝置將在 1~2 秒內套用。");
+
+    tg.sendData(data);   // ★ 把 JSON 回傳到 Telegram 聊天（web_app_data）
+    if (tg.close) tg.close(); // 可選：關閉面板
   });
+
+  // 5) 也提供 MainButton（若你未來要用）
+  if (tg && tg.MainButton) {
+    tg.MainButton.setText("送出到裝置");
+    tg.MainButton.onClick(()=>btn.click());
+    tg.MainButton.show();
+  }
 })();
 </script>
+
 </body>
+
 
 
