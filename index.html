@@ -112,6 +112,19 @@
   <div class="card">
     <button class="btn" id="send">送出到裝置（Telegram WebApp）</button>
   </div>
+<div id="tg_state" style="position:fixed;right:10px;bottom:10px;padding:6px 10px;border-radius:12px;background:#eee;font:12px/1.2 system-ui">檢查中…</div>
+<script>
+(function(){
+  const s = document.getElementById('tg_state');
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (!tg) { s.textContent = '❌ 非 Telegram WebApp'; s.style.background = '#ffd7d7'; return; }
+  if (!tg.sendData){ s.textContent = '❌ WebApp 無 sendData（外部開啟）'; s.style.background = '#ffd7d7'; return; }
+  if (tg.ready) tg.ready();
+  if (tg.expand) tg.expand();
+  s.textContent = '✅ Telegram WebApp 就緒';
+  s.style.background = '#d7ffd7';
+})();
+</script>
 
 <script>
 (function () {
@@ -162,6 +175,7 @@
 })();
 </script>
 </body>
+
 
 
 
