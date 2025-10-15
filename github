@@ -3,7 +3,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YQ Notify · WebApp</title>
+
+<!-- Telegram WebApp 官方腳本（在 TG 內會生效） -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
 <style>
   body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;margin:0;padding:16px;background:#f6fff3}
   .card{background:#fff;border:1px solid #cfe3d3;border-radius:14px;padding:14px;margin:10px auto;max-width:720px;box-shadow:0 8px 20px rgba(0,0,0,.05)}
@@ -19,10 +22,10 @@
 </style>
 
 <body>
-  <!-- ① 定時排程：改為「單純滑動開關」做通路測試 -->
+  <!-- ① 六路切換（純通路測試） -->
   <div class="card">
     <h3>🕹️ 六路測試開關（僅測試路徑）</h3>
-    <small class="hint">只切換 ON / OFF，方便先驗證 Telegram → 裝置 的通路無誤。</small>
+    <small class="hint">只切換 ON / OFF，先驗證 Telegram → 裝置 通路是否正常。</small>
     <div class="grid">
       <label class="switch">CH1 <input id="ch0" type="checkbox"></label>
       <label class="switch">CH2 <input id="ch1" type="checkbox"></label>
@@ -46,16 +49,19 @@
         <input id="ct1" placeholder="17:30" inputmode="numeric">
       </div>
     </div>
-    <small class="hint">本頁只負責送出設定；實際動作（保持秒數、定時等）之後再回 main.cpp 內部落實。</small>
+    <small class="hint">本頁只送出設定；實際動作（保持秒數、定時）之後在韌體套用。</small>
   </div>
 
+  <!-- 送出 -->
   <div class="card">
     <button class="btn" id="send">送出到裝置（Telegram WebApp）</button>
   </div>
 
+  <!-- 狀態角標 -->
   <div id="tg_state" style="position:fixed;right:10px;bottom:10px;padding:6px 10px;border-radius:12px;background:#eee;font:12px/1.2 system-ui">檢查中…</div>
 
   <script>
+  // WebApp 環境檢查
   (function(){
     const s = document.getElementById('tg_state');
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -69,12 +75,12 @@
   </script>
 
   <script>
+  // 收集與送出
   (function(){
     const tg = window.Telegram && window.Telegram.WebApp;
 
     function validHHMM(v){
-      // 允許空字串（表示不啟用），或 HH:MM（00-23:00-59）
-      if (!v) return true;
+      if (!v) return true; // 空白=停用
       const m = /^(\d{1,2}):(\d{2})$/.exec(v.trim());
       if (!m) return false;
       const hh = +m[1], mm = +m[2];
@@ -82,44 +88,36 @@
     }
 
     function collect(){
-      // 六路布林
       const chs = [];
       for (let i=0;i<6;i++){
         chs.push( document.getElementById('ch'+i).checked ? 1 : 0 );
       }
-      // #1 門檻
       let cn0 = parseInt(document.getElementById('cn0').value||'0',10);
       if (isNaN(cn0) || cn0<0) cn0 = 0;
 
-      // #2 時間
       const ct1 = (document.getElementById('ct1').value||'').trim();
       if (!validHHMM(ct1)){
-        alert('請輸入正確的 #2 每日推播時間（格式 HH:MM，例如 17:30），或留白停用。');
+        alert('請輸入正確的 #2 每日推播時間（HH:MM，例如 17:30），或留白停用。');
         throw new Error('bad time');
       }
-
-      // —— 最小可用 schema —— //
       return { chs, cn0, ct1 };
     }
 
-    // 送出
     const btn = document.getElementById('send');
     btn.addEventListener('click', ()=>{
       if (!(tg && tg.sendData)){
-        alert('請從 Telegram 內開啟此頁（點聊天裡的「⚙️ 開啟設定」）。外部瀏覽器無法送出。');
+        alert('請從 Telegram 內開啟此頁（聊天中的「⚙️ 開啟設定」）。外部瀏覽器無法送出。');
         return;
       }
       let payload;
       try{ payload = collect(); }catch(e){ return; }
-
-      // 用一致格式送出：type + payload
       const packet = { type: "save_config", payload, version: 2 };
       tg.showAlert && tg.showAlert('設定已送出，裝置將套用。');
       tg.sendData(JSON.stringify(packet));
       tg.close && tg.close();
     });
 
-    // 可選：底部主按鈕
+    // 底部主按鈕（可選）
     if (tg && tg.MainButton){
       tg.MainButton.setText('送出到裝置');
       tg.MainButton.onClick(()=>btn.click());
